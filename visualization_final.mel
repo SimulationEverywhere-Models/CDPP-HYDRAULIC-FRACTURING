@@ -1,0 +1,166 @@
+file -f -new;
+
+//create GUI
+string $mywindow = `window -title "HF Simulation" -menuBar true -widthHeight 400 100`;
+
+    columnLayout; 
+        intSliderGrp -label "Dimensions (n x n)" -field true -min 5 -max 30 -value 10 dimensions;     
+    setParent ..;
+    
+    rowColumnLayout -numberOfColumns 3 -columnAttach 1 "right" 0 -columnWidth 1 100 -columnWidth 2 200 -columnWidth 3 100;
+        text -label "Select log file:";     
+        textField -w 100 -tx "" myTextField;
+        button -label "Browse" -w 50 -command "browseFiles()"; 
+    setParent ..;
+    
+    columnLayout;    
+        button -label "Run Simulation" -command "sim()";
+    setParent ..;
+  
+showWindow $mywindow;
+
+// **********************************************************  
+// Runs the Simulation
+global proc sim()
+{
+    file -f -new;
+    
+    //acquire file path
+    string $filePath = `textField -q -text myTextField`;
+    
+    //if the file path has been specified 
+    if($filePath != "")
+    {
+        //set up the cubes in the scene
+        SetUp();
+        //read file
+        ReadLog($filePath);
+        print ("Simulation complete.");
+    }
+    else
+    {
+        //dialogue box prompting user to specify log file
+		$response = `confirmDialog -title "Confirm" 
+			              -message "Please select a log file."
+			              -button "Ok" 
+			              -defaultButton "Ok"
+			              -cancelButton "Ok"
+			              -dismissString "Ok"`;			
+    }
+}
+
+global proc browseFiles()
+{
+    //open file browsing window, filter for .log files only.
+    textField -edit -text `fileDialog2 -fileFilter "*.log" -fm 1` myTextField; 
+}
+
+// **********************************************************  
+// Draws cubes and creates materials for each based on input dimensions
+global proc SetUp()
+{ 
+    //get dimensions of simulation
+    int $dim = `intSliderGrp -q -value dimensions`;
+    
+    int $x;
+    for($x = 0; $x < $dim; $x++)
+    {
+        int $y;
+        for($y = 0; $y < $dim; $y++)
+        {    
+            $b = ($dim - 1) - $y;
+            //create shader
+            shadingNode -asShader lambert -name ("mat"+$b+"_"+$x);
+            setAttr ("mat"+$b+"_"+$x+".color") -type double3 0.447 0.317 0.242;
+            //set keyframe
+            setKeyframe ("mat"+$b+"_"+$x+".color");
+            
+            //create cube                
+            polyCube -h 1 -w 1 -d 10 -name ("c"+$b+"_"+$x);
+            move -a $x $y 0;
+            
+            //apply shader
+            hyperShade -assign ("mat"+$b+"_"+$x);           
+        }
+    }
+    
+    print "Cubes Drawn";
+    
+    delete -ch; //construction history
+}
+
+// **********************************************************  
+// Reads the log file and makes an array of Y messages
+global proc ReadLog(string $filePath) {  
+      
+    //open file
+    $fileId = `fopen $filePath "r"` ;  
+    
+    print ("Reading file..."); 
+      
+    //get the first line 
+    string $nextLine = `fgetline $fileId` ;  
+      
+    //loop until string size is zero (aka it's empty)
+    while (size($nextLine) > 0) {  
+      
+        //strip whitespaces from beginning and end of line  
+        string $cleanLine = strip($nextLine) ;  
+         
+        //if Y output
+        string $component = `match "[^Mensaje] " $cleanLine`;
+        if(strip($component) == "Y")
+        {            
+            /* Acquire relevant information **************************/
+            string $buffer[];
+            int $numTokens = `tokenize $cleanLine " / " $buffer`;
+            int $i;
+            
+            /* TIME **************************************************/
+            string $time_buffer[];
+            int $timeTokens = `tokenize $buffer[2] ":" $time_buffer`;
+
+            //conversion to frames
+            int $hours = (int)$time_buffer[0];
+            int $minutes = (int)$time_buffer[1];
+            int $seconds = (int)$time_buffer[2];
+            int $msec = (int)$time_buffer[3];
+            int $frame = 24 * (($hours * 3600) + ($minutes * 60) + $seconds + ($msec * 0.001));
+             
+            /* ID *****************************************************/
+            string $id_buffer[];
+            int $idTokens = `tokenize $buffer[3] "," $id_buffer`;
+            string $xString = `match "[^ground(]*$" $id_buffer[0]`;
+            string $yString = `match "[0-9]*" $id_buffer[1]`;
+            int $xID = (int)$xString;
+            int $yID = (int)$yString;
+            
+            /* STATE **************************************************/
+            float $state = (float)$buffer[5];
+            
+            // print lines to test info acquisition
+            /*print $cleanLine;
+            print ("\nstate : "+$state+"\n");
+            print $frame;
+            print ("\nX: "+$xID+"\nY: "+$yID+"\n");  */        
+            
+            //go to relevant frame
+            currentTime $frame;
+            
+            //change colour based on state, similar to .pal file
+            if($state <= 1) setAttr ("mat"+$xID+"_"+$yID+".color") -type double3 0.447 0.317 0.242;
+            if($state > 1 && $state <= 10000) setAttr ("mat"+$xID+"_"+$yID+".color") -type double3 0.706 0.427 0.266;
+            if($state > 10000 && $state <= 1000000) setAttr ("mat"+$xID+"_"+$yID+".color") -type double3 0.5 0.5 0.5;
+            if($state > 1000000 && $state <= 100000000) setAttr ("mat"+$xID+"_"+$yID+".color") -type double3 0.3 0.3 0.3;
+            if($state > 100000000 && $state <= 1000000000) setAttr ("mat"+$xID+"_"+$yID+".color") -type double3 0.2 0.8 1;
+            
+            //set new keyframe
+            setKeyframe ("mat"+$xID+"_"+$yID+".color");
+        }        
+          
+        //get next line and continue 
+        $nextLine = `fgetline $fileId` ;  
+      
+    }    
+        
+}  
